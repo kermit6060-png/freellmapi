@@ -1,4 +1,4 @@
-# FreeLLMAPI self-fork â€?auto-sync upstream, keep /v1/models ours only
+# FreeLLMAPI self-fork — auto-sync upstream, keep /v1/models ours only
 #
 # Runs daily. If upstream tashfeenahmed/freellmapi has a newer release tag,
 # this workflow syncs the code, applies our patch (only /v1/models default),
@@ -53,15 +53,14 @@ jobs:
 
       - name: Sync upstream code
         if: steps.check.outputs.already == 'false'
-          run: |
-            FORK_MAIN=$(git rev-parse HEAD)
-            git remote add upstream https://github.com/tashfeenahmed/freellmapi.git || true
-            git fetch upstream --tags
-            git checkout -B main "${{ steps.upstream.outputs.tag }}"
-            # Restore our own files (patch + workflow) from the fork's previous main
-            git checkout "$FORK_MAIN" -- patches .github
-            git status --short
-
+        run: |
+          FORK_MAIN=$(git rev-parse HEAD)
+          git remote add upstream https://github.com/tashfeenahmed/freellmapi.git || true
+          git fetch upstream --tags
+          git checkout -B main "${{ steps.upstream.outputs.tag }}"
+          # Restore our own files (patch + workflow) from the fork's previous main
+          git checkout "$FORK_MAIN" -- patches .github
+          git status --short
 
       - name: Apply our patch
         if: steps.check.outputs.already == 'false'
