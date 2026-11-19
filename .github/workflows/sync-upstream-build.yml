@@ -104,7 +104,5 @@ jobs:
       - name: Tag and push
         if: steps.check.outputs.already == 'false'
         run: |
-          git add -A
-          git -c user.name="xuan-shu-bot" -c user.email="bot@xuan-shu.local" commit -m "Sync upstream ${{ steps.upstream.outputs.tag }} + xuan-shu patch" || echo "nothing to commit"
           git tag "${{ steps.upstream.outputs.tag }}-xuan-shu"
-          git push origin main --tags
+          git push origin "${{ steps.upstream.outputs.tag }}-xuan-shu"
