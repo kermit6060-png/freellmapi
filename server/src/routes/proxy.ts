@@ -347,17 +347,16 @@ export function setStickyModel(messages: ChatMessage[], modelDbId: number, sessi
 proxyRouter.get('/models', (req: Request, res: Response) => {
   if (!requireInferenceAuth(req, res)) return;
 
-  // By default we return the WHOLE catalog (one row per model id), each tagged
-  // with whether it is currently usable, so a client can see everything and know
-  // what's connected vs. disabled/keyless (#242). `?available=true` (aliases
-  // `?connected=true`, `?ready=true`) narrows the list to only models that can
-  // serve a request right now — the previous default behavior. The `ready`
-  // alias is the machine-readable filter a meta-gateway uses (#433) to ask
-  // "which models can this instance actually serve now". `available` is computed as
-  // "enabled AND an enabled key can serve it"; dedup prefers an available
-  // instance of a model id over a disabled/keyless one.
+  // SELF-FORK CHANGE (xuan-shu): by default we return ONLY models this
+  // instance can actually serve (enabled AND an enabled key can serve it),
+  // so any client that calls /v1/models without parameters sees only our
+  // own configured models. Pass `?available=0` (aliases `?connected=0`,
+  // `?ready=0`) to see the whole catalog instead. This inverts upstream
+  // PR #289 (2026-06-11), which made the whole catalog the default.
+  // Upstream default: `?available=true` narrows to only usable models.
+  // Here the default IS only usable models; `?available=0` opts out.
   const q = String(req.query.available ?? req.query.connected ?? req.query.ready ?? '').toLowerCase();
-  const onlyAvailable = q === '1' || q === 'true' || q === 'yes';
+  const onlyAvailable = !(q === '0' || q === 'false' || q === 'no');
   const esValues: Record<string, NormalizedModel['executionStatus']> = {
     ready: 'ready', needskey: 'needsKey', exhausted: 'exhausted',
   };

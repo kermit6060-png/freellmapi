@@ -1,0 +1,110 @@
+# FreeLLMAPI self-fork — auto-sync upstream, keep /v1/models ours only
+#
+# Runs daily. If upstream tashfeenahmed/freellmapi has a newer release tag,
+# this workflow syncs the code, applies our patch (only /v1/models default),
+# builds the Docker image, and pushes it to ghcr.io.
+#
+# The image is tagged:
+#   ghcr.io/<owner>/freellmapi:<upstream-version>-xuan-shu
+# e.g. ghcr.io/kermit6060/freellmapi:v0.16.35-xuan-shu
+#
+# VM206 pulls the new image with scripts/update-freellmapi.sh.
+#
+# If the patch fails to apply (upstream changed the code around it), the
+# workflow FAILS loudly instead of shipping a broken build. Fix the patch
+# in patches/v1-models-default-only-available.patch and re-run.
+
+name: sync-upstream-build
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # daily 02:00 UTC = 10:00 CST
+  workflow_dispatch:     # manual run from Actions tab
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  sync-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout self-fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest upstream release tag
+        id: upstream
+        run: |
+          TAG=$(curl -s https://api.github.com/repos/tashfeenahmed/freellmapi/releases/latest | python3 -c "import sys,json;print(json.load(sys.stdin)['tag_name'])")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Upstream latest: $TAG"
+
+      - name: Check if already built
+        id: check
+        run: |
+          if git tag -l | grep -qx "${{ steps.upstream.outputs.tag }}-xuan-shu"; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "Already built ${{ steps.upstream.outputs.tag }}-xuan-shu, skipping."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync upstream code
+        if: steps.check.outputs.already == 'false'
+        run: |
+          FORK_MAIN=$(git rev-parse HEAD)
+          git remote add upstream https://github.com/tashfeenahmed/freellmapi.git || true
+          git fetch upstream --tags
+          git checkout -B main "${{ steps.upstream.outputs.tag }}"
+          # Restore our own files (patch + workflow) from the fork's previous main
+          git checkout "$FORK_MAIN" -- patches .github
+          git status --short
+
+      - name: Apply our patch
+        if: steps.check.outputs.already == 'false'
+        run: |
+          git apply --check patches/v1-models-default-only-available.patch
+          git apply patches/v1-models-default-only-available.patch
+          git diff --stat
+          echo "Patch applied."
+
+      - name: Verify patch behaviour (unit check)
+        if: steps.check.outputs.already == 'false'
+        run: |
+          grep -n "onlyAvailable = !(q ===" server/src/routes/proxy.ts
+          grep -n "SELF-FORK CHANGE" server/src/routes/proxy.ts
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.already == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: steps.check.outputs.already == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        if: steps.check.outputs.already == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/freellmapi:${{ steps.upstream.outputs.tag }}-xuan-shu
+            ghcr.io/${{ github.repository_owner }}/freellmapi:latest-xuan-shu
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Tag and push
+        if: steps.check.outputs.already == 'false'
+        run: |
+          git add -A
+          git -c user.name="xuan-shu-bot" -c user.email="bot@xuan-shu.local" commit -m "Sync upstream ${{ steps.upstream.outputs.tag }} + xuan-shu patch" || echo "nothing to commit"
+          git tag "${{ steps.upstream.outputs.tag }}-xuan-shu"
+          git push origin main --tags
